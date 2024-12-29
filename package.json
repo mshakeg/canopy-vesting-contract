@@ -14,7 +14,7 @@
     "deploy": "yarn workspace @scaffold-move/move publish",
     "publish": "yarn workspace @scaffold-move/move publish",
     "compile": "yarn workspace @scaffold-move/move compile",
-    "test": "",
+    "test": "yarn workspace @scaffold-move/move test",
     "format": "yarn next:format",
     "start": "yarn workspace @scaffold-move/nextjs dev",
     "next:lint": "yarn workspace @scaffold-move/nextjs lint",
