@@ -7,3 +7,6 @@ rev = 'main'
 subdir = 'aptos-move/framework/aptos-framework'                                                                                                                                                                                            
 [addresses]
 deployment_addr='0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690'
+fa_address='0xe6c5f8369b33a8b03287731d1975c8640d953142da2ca55a50bd078395771578'
+initial_reward_creator_addr = "0x234"
+initial_stream_creator_addr = "0x234"
