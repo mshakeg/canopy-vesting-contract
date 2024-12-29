@@ -15,6 +15,8 @@ module deployment_addr::vesting {
 
     // ================================= Errors ================================= //
 
+    /// Start time must be in the future
+    const ERR_START_TIME_MUST_BE_IN_THE_FUTURE: u64 = 1;
     /// Reward schedule already exists
     const ERR_VESTING_STREAM_ALREADY_EXISTS: u64 = 4;
     /// Only reward creator can add reward
@@ -151,9 +153,11 @@ module deployment_addr::vesting {
         let sender_addr = signer::address_of(sender);
         let stake_pool = borrow_global<VestingData>(@deployment_addr);
 
-        transfer_reward_to_claimer(claimable_tokens, sender_addr, stake_pool);
+        transfer_tokens_to_claimer(claimable_tokens, sender_addr, stake_pool);
+        let vesting_data = borrow_global_mut<VestingData>(@deployment_addr);
+        let vesting_stream = simple_map::borrow_mut(&mut vesting_data.streams, &sender_addr);
+        vesting_stream.claimed_amount = vesting_stream.claimed_amount + claimable_tokens;
     }
-
 
     /// Create new reward schedule
     /// Only reward creator can call
@@ -169,6 +173,7 @@ module deployment_addr::vesting {
         let sender_addr = signer::address_of(sender);
         let config = borrow_global<Config>(@deployment_addr);
         assert!(config.stream_creator == sender_addr, ERR_ONLY_STREAM_CREATOR_CAN_ADD_VESTING_STREAM);
+        assert!(start_time > timestamp::now_seconds(), ERR_START_TIME_MUST_BE_IN_THE_FUTURE);
 
         let vesting_pool_mut = borrow_global_mut<VestingData>(@deployment_addr);
         
@@ -210,7 +215,6 @@ module deployment_addr::vesting {
         let vesting_data = borrow_global<VestingData>(@deployment_addr);
         let vesting_stream = simple_map::borrow(&vesting_data.streams, &user);
         
-        
         let claimable_amount = calculate_vested_amount(vesting_stream.amount, vesting_stream.start_time, vesting_stream.cliff, vesting_stream.duration);
         claimable_amount - vesting_stream.claimed_amount
         
@@ -240,9 +244,14 @@ module deployment_addr::vesting {
         let elapsed_time = current_time - begin_unlock_time;
         // let percentage_unlocked = elapsed_time / duration;
         (amount * elapsed_time) / duration
-
     }
 
+    #[view]
+    public fun is_stream_finished(user: address): bool acquires VestingData {
+        let vesting_data = borrow_global<VestingData>(@deployment_addr);
+        let vesting_stream = simple_map::borrow(&vesting_data.streams, &user);
+        vesting_stream.claimed_amount == vesting_stream.amount
+    }
     // ================================= Helper Functions ================================= //
 
     /// Check if sender is admin or owner of the object when package is published to object
@@ -265,7 +274,7 @@ module deployment_addr::vesting {
 
 
     /// Transfer reward from reward store to claimer
-    fun transfer_reward_to_claimer(
+    fun transfer_tokens_to_claimer(
         claimable_reward: u64, user_addr: address, stake_pool: &VestingData
     ) acquires FungibleStoreController {
         fungible_asset::transfer(
