@@ -1,118 +1,63 @@
-# 🏗 Scaffold Move
+# Vesting Contract Challenge
 
-<div align="center">
+## Instructions 
+The goal of this challenge is to implement a vesting contract in the Move language, with functionality to allow an owner to set up vesting streams for multiple users. Each user should be able to check their vested balance and claim the tokens as they vest over time. The contract must handle vesting streams with individual cliff and duration parameters for each user. 
 
-![logo](/assets/logo_small.png)
-<h4 align="center">
-  <a href="https://scaffold-move-docs.vercel.app/">Documentation</a> |
-  <a href="https://scaffold-move-chi.vercel.app/">Website</a>
-</h4>
-</div>
+### Requirements:
 
-🧪 Scaffold Move is an open-source, cutting-edge toolkit for building decentralized applications (dApps) on Aptos or any other Move-based blockchain. It's designed to streamline the process of creating and deploying Move modules and building user interfaces that interact seamlessly with those modules.
+ 1. Owner Role: The contract should allow the owner to set up and manage vesting streams for different users.
+ 2. Vesting Stream: Each user has their own vesting stream, defined by the following parameters:
+  • Beneficiary: The address of the user receiving the vested tokens.
+  • Amount: The total number of tokens to be vested.
+  • Start Time: The time when the vesting period starts.
+  • Cliff: The duration of the cliff, before tokens can be claimed.
+  • Duration: The total duration of the vesting period.
+ 3. User Functions:
+  • Users can check their vested token balance (the amount of tokens they are eligible to claim).
+  • Users can claim the vested tokens that have been unlocked by the vesting schedule.
+ 4. Security:
+  • Only the owner can set up and modify vesting streams.
+  • Users can only claim their vested tokens (they cannot modify the vesting stream).
+  • The contract must handle cases where users have already claimed their full amount.
+  
+The project should include unit tests to verify the correct implementation of the functionality as well as edge cases.
 
-⚙️ Built using Move, Aptos TS SDK, Next.js, Tailwind CSS, and TypeScript.
 
-- 🛫 **Deployment Scripts**: Simplify and automate your deployment workflow.
-- ✅ **Module Hot Reload**: Your frontend automatically adapts to changes in your Move modules as you edit them.
-- 🪝 **Custom Hooks**: A collection of React hooks to simplify interactions with Move modules.
-- 🧱 **Components**: A library of common Web3 components to rapidly build your frontend.
-- 🔐 **Wallet Integration**: Connect to any Aptos-compatible wallet and interact with the Aptos network directly from your frontend.
+## Solution
 
-Perfect for hackathons, prototyping, or launching your next Move project!
-
-![Debug Modules tab](assets/debug.png)
-
-## Requirements
-
-Before you begin, you need to install the following tools:
-
-- [Node (>= v18.17)](https://nodejs.org/en/download/)
-- Yarn ([v1](https://classic.yarnpkg.com/en/docs/install/) or [v2+](https://yarnpkg.com/getting-started/install))
-- [Git](https://git-scm.com/downloads)
-- [Aptos CLI](https://aptos.dev/en/build/cli)
-
-## Quickstart
-
-To get started with Scaffold Move, follow the steps below:
-
-1. Clone this repo & install dependencies
-
+This project is created using the [Scaffold Move template](https://github.com/arjanjohan/scaffold-move). Use the following commands to setup the project and run the tests:
 ```
-git clone https://github.com/arjanjohan/scaffold-move.git
-cd scaffold-move
 yarn install
+yarn compile
+yarn test
+```
+### Smart contract
+The [vesting.move](packages/move/sources/vesting.move) contract contains the solution for the challenge. The entry functions are:
+#### create_vesting_stream
+Only calleable by the admin. Creates a new stream and stores the details mapped to the beneficiary's address. Transfers the FA token amount to the vesting pool primary fungible store.
+
+#### claim_tokens
+Callable by the beneficiary. Checks if a stream exists and if the claimable amount is positive before transferring the tokens to the beneficiary. After a claim, the `claimed_amount` value is updated.
+
+### Tests
+The tests are located in [test_end_to_end.move](packages/move/tests/test_end_to_end.move). To run these tests, use the command `yarn test` from either the project root or the `packages/move` directory. The output should look like this:
+```
+Running Move unit tests
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_calculate_vested_amount
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_claim_when_stream_does_not_exist
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_claim_zero_amount_error
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_create_stream_starting_in_the_past
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_create_stream_with_after_other_stream_completed
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_happy_path
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_only_admin_can_create_stream
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_only_one_stream_per_user
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_view_functions
+Test result: OK. Total tests: 9; passed: 9; failed: 0
+{
+  "Result": "Success"
+}
 ```
 
-2. Run a local network in  the first terminal:
-
-```
-yarn chain
-```
-
-**If you are deploying to devnet or testnet, you can skip this step.**
-
-3. On a second terminal, initialize a new account.
-
-```
-yarn account
-```
-
-This command overwrites `packages/move/.aptos/config.yaml` with a new Aptos account. The new address is copied over to the first address in the Move.toml file. If no address exists in this file, it is added on a new line.
-
-4. Deploy the test modules:
-
-```
-yarn deploy
-```
-
-This command deploys the move modules to the selected network. The modules are located in `packages/move/sources` and can be modified to suit your needs. The `yarn deploy` command uses `aptos move publish` to publish the modules to the network. After this is executes the script located in `scripts/loadModules.js` to make the new modules available in the nextjs frontend.
-
-5. On a third terminal, start your NextJS app:
-
-```
-yarn start
-```
-
-Visit your app on: `http://localhost:3000`. You can interact with your Move modules using the `Debug Modules` page. You can tweak the app config in `packages/nextjs/scaffold.config.ts`.
-
-**What's next**:
-
-- Edit your Move module `OnchainBio.move` in `packages/move/sources`
-- Edit your frontend homepage at `packages/nextjs/app/page.tsx`. For guidance on [routing](https://nextjs.org/docs/app/building-your-application/routing/defining-routes) and configuring [pages/layouts](https://nextjs.org/docs/app/building-your-application/routing/pages-and-layouts) checkout the Next.js documentation.
-<!-- - Edit your Move modules test in: `packages/move/test`. To run test use `yarn hardhat:test` -->
-
-## Future Development
-
-Scaffold Move has successfully implemented core features essential for Move developers, providing a robust foundation for building decentralized applications. The current version offers a streamlined development experience with hot module reloading, custom hooks, and seamless wallet integration.
-
-Looking ahead, we have an exciting roadmap of enhancements and new features planned:
-
-- Add a testing framework for Move modules.
-- Add custom networks to network switching. This is currently not available in the Aptos Wallet Adapter. Once [our PR](https://github.com/aptos-labs/aptos-wallet-adapter/pull/425) is merged, this feature will be added to Scaffold Move.
-- Enhance documentation and create tutorials for easier onboarding.
-- Develop additional pre-built components for common dApp functionalities.
-- Integrate different templates/configurations (similar to [create-aptos-dapp](https://aptos.dev/en/build/create-aptos-dapp))
-
-We're committed to evolving Scaffold Move based on community feedback and emerging best practices in the Move ecosystem. For a detailed list of upcoming features and to contribute ideas, please check our [GitHub Issues](https://github.com/arjanjohan/scaffold-move/issues).
-
-Your input is valuable! If you have suggestions or want to contribute, we encourage you to get involved and help shape the future of Scaffold Move. Join our [developer Telegram channel](https://t.me/+lOn2MJawQlc1YjA8) to connect with the community and stay updated on the latest developments.
-
-## Links
-
-- [Documentation](https://scaffold-move-docs.vercel.app/)
-- [Website](https://scaffold-move-chi.vercel.app/)
-- [Pitch deck](https://docs.google.com/presentation/d/1jtmK_ovNIO3gprsLseHifV5Qv8vve2dBbvlYiycxbZI/edit?usp=sharing)
-- [Telegram Community](https://t.me/+lOn2MJawQlc1YjA8)
-- [Demo video](https://youtu.be/0PPJb1M8ukQ)
-- [Github](https://github.com/arjanjohan/scaffold-move)
-
-## Credits
-
-None of this would have been possible without the great work done in:
-- [Scaffold-ETH 2](https://github.com/scaffold-eth/scaffold-eth-2)
-- [Aptos Explorer](https://github.com/aptos-labs/explorer)
-
-## Team
-
-- [arjanjohan](https://x.com/arjanjohan/)
+## Assumptions
+- The Move contract only handles the vesting of a single FA. I have defined the FA address associated with the vesting contract in the move.toml file. In the tests, the FA is created in the setup function `setup_test_env`.
+- Each address can only get 1 vesting stream at a time. Only when a vesting stream has completed and the full amount has been claimed, can a new stream be created.
