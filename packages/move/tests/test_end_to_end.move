@@ -339,4 +339,53 @@ module deployment_addr::test_end_to_end {
         assert!(stream_cliff == cliff, 5);
         assert!(stream_duration == duration, 6);
     }
+
+    #[test(aptos_framework = @0x1, sender = @deployment_addr, user1 = @0x101)]
+    fun test_round_for_small_stream(
+        aptos_framework: &signer, sender: &signer, user1: &signer
+    ) {
+        let fa_metadata_object = setup_test_env(aptos_framework, sender);
+
+        let total_vesting_amount = 1;
+        let start_time = 100;
+        let cliff = 100;
+        let duration = 10000;
+
+        let user1_addr = signer::address_of(user1);
+
+        vesting::create_vesting_stream(
+            sender,
+            user1_addr,
+            total_vesting_amount,
+            start_time,
+            cliff,
+            duration
+        );
+
+        let user1_balance = primary_fungible_store::balance(user1_addr, fa_metadata_object);
+        assert!(user1_balance == 0, user1_balance);
+
+        // at the start of the cliff, 0 should be claimable
+        timestamp::update_global_time_for_test_secs(start_time + cliff);
+        let claimable_amount = vesting::get_claimable_amount(user1_addr);
+        assert!(claimable_amount == 0, claimable_amount);
+
+        // 1 second before the end before the end of the duration, still 0 should be claimable (due to rounding)
+        timestamp::update_global_time_for_test_secs(start_time + cliff + (duration - 1));
+        let claimable_amount = vesting::get_claimable_amount(user1_addr);
+        assert!(claimable_amount == 0, claimable_amount);
+
+        // after duration the remaining half should be claimable
+        timestamp::update_global_time_for_test_secs(start_time + cliff + duration);
+        let claimable_amount = vesting::get_claimable_amount(user1_addr);
+        assert!(
+            claimable_amount == total_vesting_amount,
+            claimable_amount
+        );
+        vesting::claim_tokens(user1);
+
+        // After claiming twice, the total amount should be claimed
+        let user1_balance_after_claim = primary_fungible_store::balance(user1_addr, fa_metadata_object);
+        assert!(user1_balance_after_claim == total_vesting_amount, user1_balance_after_claim);
+    }
 }
