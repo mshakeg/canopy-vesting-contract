@@ -8,7 +8,7 @@
     "publish": "aptos move publish --assume-yes && node scripts/loadModules.js",
     "compile": "aptos move compile",
     "test": "aptos move test",
-    "format": "aptos move fmt"
+    "format": "aptos move fmt --config max_width=110"
   },
   "dependencies": {
     "aptos": "^1.21.0",
