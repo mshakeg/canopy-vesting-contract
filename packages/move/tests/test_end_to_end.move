@@ -62,6 +62,13 @@ module deployment_addr::test_end_to_end {
         let user1_balance = primary_fungible_store::balance(user1_addr, fa_metadata_object);
         assert!(user1_balance == 0, user1_balance);
 
+        // FIX: for more thorough testing you'll want to add other assertions such as VestingStream, etc state being initialized correctly
+        // and that the relevant fungible store increased it's holding appropriately.
+
+        // FIX: instead of using timestamp::update_global_time_for_test_secs to update the time
+        // you could simply use timestamp::fast_forward_seconds to fast forward a specified number of seconds
+        // making the tests for easily understandable
+
         // at the start of the cliff, 0 should be claimable
         timestamp::update_global_time_for_test_secs(start_time + cliff);
         let claimable_amount = vesting::get_claimable_amount(user1_addr);

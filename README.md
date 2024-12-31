@@ -1,7 +1,7 @@
 # Vesting Contract Challenge
 
-## Instructions 
-The goal of this challenge is to implement a vesting contract in the Move language, with functionality to allow an owner to set up vesting streams for multiple users. Each user should be able to check their vested balance and claim the tokens as they vest over time. The contract must handle vesting streams with individual cliff and duration parameters for each user. 
+## Instructions
+The goal of this challenge is to implement a vesting contract in the Move language, with functionality to allow an owner to set up vesting streams for multiple users. Each user should be able to check their vested balance and claim the tokens as they vest over time. The contract must handle vesting streams with individual cliff and duration parameters for each user.
 
 ### Requirements:
 
@@ -19,7 +19,7 @@ The goal of this challenge is to implement a vesting contract in the Move langua
   • Only the owner can set up and modify vesting streams.
   • Users can only claim their vested tokens (they cannot modify the vesting stream).
   • The contract must handle cases where users have already claimed their full amount.
-  
+
 The project should include unit tests to verify the correct implementation of the functionality as well as edge cases.
 
 
