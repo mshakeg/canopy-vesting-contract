@@ -25,13 +25,28 @@ module deployment_addr::vesting {
     /// User try to claim zero
     const ERR_AMOUNT_ZERO: u64 = 10;
 
-    struct VestingStream has key, store, drop {
+    // FIX: key ability is not needed for VestingStream since it isn't keyed to an address in global storage
+
+    // FIX: current implementation treats cliff as a delay period before linear vesting begins. Which is kind of redundant since the start_time can be specified
+    // For a proper vesting cliff implementation, VestingStream should include a cliff_amount field
+    // that represents tokens immediately unlocked when cliff is reached. Current implementation
+    // seems to always start linear vesting from 0 at cliff time, whereas typically some percentage
+    // of tokens should unlock immediately at cliff time(in your case that percentage is effectively 0).
+
+    struct VestingStream has store, drop {
         amount: u64,
         claimed_amount: u64,
         start_time: u64,
         cliff: u64,
         duration: u64
     }
+
+    // FIX: it seems like your implementation requires a new vesting module to be deployed for every FA to be streamed
+    // and it also only supports a single VestingStream for a given address.
+    // To generalize this I would instead allow anyone to create arbitrary VestingStream object instances i.e. Object<VestingStream>
+    // The owner of the Object<VestingStream> is essentially the admin and can do admin actions
+    // #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    // And the object signer associated with the Object<VestingStream> can be used to withdraw funds from the fungible store for that stream
 
     struct VestingData has key {
         // Fungible asset metadata object
@@ -52,17 +67,24 @@ module deployment_addr::vesting {
 
     /// Global per contract
     struct Config has key {
+        // FIX: for something like Sablier's stream's that are decentralized i.e. anyone can create streams, we'd
+        // want the admin to be per stream and not a single global admin
+
         // Admin can set pending admin, accept admin, and create vesting streams
         admin: address,
         // Pending admin can accept admin
         pending_admin: Option<address>
     }
 
+    // - - - CONSTRUCTOR - - -
+
     /// If you deploy the module under an object, sender is the object's signer
     /// If you deploy the module under your own account, sender is your account's signer
     fun init_module(sender: &signer) {
         init_module_internal(sender, object::address_to_object<Metadata>(@fa_address));
     }
+
+    // - - - CONSTRUCTOR HELPER FUNCTION - - -
 
     fun init_module_internal(sender: &signer, fa_metadata_object: Object<Metadata>) {
         let sender_addr = signer::address_of(sender);
@@ -89,6 +111,10 @@ module deployment_addr::vesting {
 
     // ================================= Entry Functions ================================= //
 
+    // FIX: the following global admin functions would not be needed if each VestingStream is a member of Object, since each Object has an owner
+
+    // - - - ADMIN FUNCTIONS - - -
+
     /// Set pending admin of the contract, then pending admin can call accept_admin to become admin
     public entry fun set_pending_admin(sender: &signer, new_admin: address) acquires Config {
         let sender_addr = signer::address_of(sender);
@@ -109,6 +135,14 @@ module deployment_addr::vesting {
         config.pending_admin = option::none();
     }
 
+    //// - - - CLAIMER FUNCTIONS - - -
+
+    // FIX: given the above suggested fixes, the VestingStream would have to track the claimer for that stream
+    // the claim_tokens function would have to be adjusted to accept Object<VestingStream>
+    // Additionally, it would not have to accept sender: &signer, since anyone should be able to call claim_tokens
+    // which should transfer all tokens available to claim to the claimer
+    // Additionally, on a claim_tokens call that is beyond the end time, you could cleanup storage and delete the VestingStream
+
     /// Claim vested tokens
     /// Any beneficiary can call
     public entry fun claim_tokens(sender: &signer) acquires VestingData, FungibleStoreController {
@@ -124,6 +158,11 @@ module deployment_addr::vesting {
         vesting_stream.claimed_amount = vesting_stream.claimed_amount + claimable_tokens;
     }
 
+    // - - - CREATE STREAM - - -
+
+    // FIX: given the above recommended fixes the create_vesting_stream function would have to be adjusted to allow the creation of arbitrary Object<VestingStream> instances
+    // The current implementation only allows a given benefiary to have only a single stream.
+
     /// Create new vesting stream
     /// Only admin can call
     /// Abort if vesting stream already exists
@@ -138,6 +177,8 @@ module deployment_addr::vesting {
         let sender_addr = signer::address_of(sender);
         let config = borrow_global<Config>(@deployment_addr);
         assert!(config.admin == sender_addr, ERR_ONLY_ADMIN_CAN_ADD_VESTING_STREAM);
+
+        // FIX: what's the concern with using >= instead of > below?
         assert!(start_time > timestamp::now_seconds(), ERR_START_TIME_MUST_BE_IN_THE_FUTURE);
 
         let vesting_pool_mut = borrow_global_mut<VestingData>(@deployment_addr);
