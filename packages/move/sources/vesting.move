@@ -1,12 +1,37 @@
 module deployment_addr::vesting {
-    use std::option::{Self, Option};
     use std::signer;
-    use aptos_std::simple_map::{Self, SimpleMap};
 
     use aptos_framework::fungible_asset::{Self, Metadata, FungibleStore};
-    use aptos_framework::object::{Self, Object, ExtendRef, ObjectCore};
+    use aptos_framework::object::{Self, Object, ExtendRef};
     use aptos_framework::primary_fungible_store;
     use aptos_framework::timestamp;
+    use aptos_framework::event;
+
+    #[test_only]
+    use std::vector;
+    #[test_only]
+    use std::option::{Self, Option};
+
+    // ================================= Events ================================= //
+
+    #[event]
+    struct CreateVestingStreamEvent has store, drop {
+        object_address: address,
+        vesting_stream: Object<VestingStream>
+    }
+
+    #[event]
+    struct ClaimVestingStreamEvent has store, drop {
+        object_address: address,
+        vesting_stream: Object<VestingStream>,
+        claimed_amount: u64
+    }
+
+    #[event]
+    struct DeleteVestingStreamEvent has store, drop {
+        vesting_stream: Object<VestingStream>,
+        object_address: address
+    }
 
     // ================================= Errors ================================= //
 
@@ -14,272 +39,252 @@ module deployment_addr::vesting {
     const ERR_START_TIME_MUST_BE_IN_THE_FUTURE: u64 = 1;
     /// Vesting stream does not exist
     const ERR_VESTING_STREAM_DOES_NOT_EXIST: u64 = 2;
-    /// Vesting stream already exists
-    const ERR_VESTING_STREAM_ALREADY_EXISTS: u64 = 4;
-    /// Only admin can add stream
-    const ERR_ONLY_ADMIN_CAN_ADD_VESTING_STREAM: u64 = 5;
-    /// Only admin can set pending admin
-    const ERR_ONLY_ADMIN_CAN_SET_PENDING_ADMIN: u64 = 6;
-    /// Only pending admin can accept admin
-    const ERR_ONLY_PENDING_ADMIN_CAN_ACCEPT_ADMIN: u64 = 7;
     /// User try to claim zero
-    const ERR_AMOUNT_ZERO: u64 = 10;
+    const ERR_AMOUNT_ZERO: u64 = 3;
+    /// Duration must be greater than 0
+    const ERR_DURATION_ZERO: u64 = 4;
+    /// Cliff amount must be less than amount
+    const ERR_CLIFF_AMOUNT_MUST_BE_LESS_OR_EQUAL_THAN_AMOUNT: u64 = 5;
 
-    struct VestingStream has key, store, drop {
+    // ================================= Structs ================================= //
+
+    // FIX: key ability is not needed for VestingStream since it isn't keyed to an address in global storage
+
+    // FIX: current implementation treats cliff as a delay period before linear vesting begins. Which is kind of redundant since the start_time can be specified
+    // For a proper vesting cliff implementation, VestingStream should include a cliff_amount field
+    // that represents tokens immediately unlocked when cliff is reached. Current implementation
+    // seems to always start linear vesting from 0 at cliff time, whereas typically some percentage
+    // of tokens should unlock immediately at cliff time(in your case that percentage is effectively 0).
+
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct VestingStream has key {
+        beneficiary: address,
         amount: u64,
         claimed_amount: u64,
         start_time: u64,
-        cliff: u64,
-        duration: u64
-    }
-
-    struct VestingData has key {
-        // Fungible asset metadata object
+        cliff_amount: u64,
+        duration: u64,
         fa_metadata_object: Object<Metadata>,
-        // Fungible store to hold vesting tokens
-        vesting_store: Object<FungibleStore>,
-        // Total vesting amount in the contract
-        total_vesting_amount: u64,
-        // Mapping of user address to vesting stream
-        streams: SimpleMap<address, VestingStream>
+        vesting_store: Object<FungibleStore>
     }
 
-    /// Global per contract
-    /// Generate signer to send tokens from vesting store to user
-    struct FungibleStoreController has key {
+    // FIX: it seems like your implementation requires a new vesting module to be deployed for every FA to be streamed
+    // and it also only supports a single VestingStream for a given address.
+    // To generalize this I would instead allow anyone to create arbitrary VestingStream object instances i.e. Object<VestingStream>
+    // The owner of the Object<VestingStream> is essentially the admin and can do admin actions
+    // #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    // And the object signer associated with the Object<VestingStream> can be used to withdraw funds from the fungible store for that stream
+
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct ObjectController has key {
+        delete_ref: object::DeleteRef,
         extend_ref: ExtendRef
     }
 
-    /// Global per contract
-    struct Config has key {
-        // Admin can set pending admin, accept admin, and create vesting streams
-        admin: address,
-        // Pending admin can accept admin
-        pending_admin: Option<address>
-    }
-
-    /// If you deploy the module under an object, sender is the object's signer
-    /// If you deploy the module under your own account, sender is your account's signer
-    fun init_module(sender: &signer) {
-        init_module_internal(sender, object::address_to_object<Metadata>(@fa_address));
-    }
-
-    fun init_module_internal(sender: &signer, fa_metadata_object: Object<Metadata>) {
-        let sender_addr = signer::address_of(sender);
-        move_to(sender, Config { admin: sender_addr, pending_admin: option::none() });
-
-        let fungible_store_constructor_ref = &object::create_object(sender_addr);
-        move_to(
-            sender,
-            FungibleStoreController { extend_ref: object::generate_extend_ref(fungible_store_constructor_ref) }
-        );
-
-        move_to(
-            sender,
-            VestingData {
-                fa_metadata_object,
-                vesting_store: fungible_asset::create_store(
-                    fungible_store_constructor_ref, fa_metadata_object
-                ),
-                total_vesting_amount: 0,
-                streams: simple_map::new()
-            }
-        );
-    }
+    // FIX: for something like Sablier's stream's that are decentralized i.e. anyone can create streams, we'd
+    // want the admin to be per stream and not a single global admin
 
     // ================================= Entry Functions ================================= //
 
-    /// Set pending admin of the contract, then pending admin can call accept_admin to become admin
-    public entry fun set_pending_admin(sender: &signer, new_admin: address) acquires Config {
-        let sender_addr = signer::address_of(sender);
-        let config = borrow_global_mut<Config>(@deployment_addr);
-        assert!(is_admin(config, sender_addr), ERR_ONLY_ADMIN_CAN_SET_PENDING_ADMIN);
-        config.pending_admin = option::some(new_admin);
-    }
+    // FIX: the following global admin functions would not be needed if each VestingStream is a member of Object, since each Object has an owner
 
-    /// Accept admin of the contract
-    public entry fun accept_admin(sender: &signer) acquires Config {
-        let sender_addr = signer::address_of(sender);
-        let config = borrow_global_mut<Config>(@deployment_addr);
-        assert!(
-            config.pending_admin == option::some(sender_addr),
-            ERR_ONLY_PENDING_ADMIN_CAN_ACCEPT_ADMIN
-        );
-        config.admin = sender_addr;
-        config.pending_admin = option::none();
-    }
+    //// - - - CLAIMER FUNCTIONS - - -
+
+    // FIX: given the above suggested fixes, the VestingStream would have to track the claimer for that stream
+    // the claim_tokens function would have to be adjusted to accept Object<VestingStream>
+    // Additionally, it would not have to accept sender: &signer, since anyone should be able to call claim_tokens
+    // which should transfer all tokens available to claim to the claimer
+    // Additionally, on a claim_tokens call that is beyond the end time, you could cleanup storage and delete the VestingStream
 
     /// Claim vested tokens
     /// Any beneficiary can call
-    public entry fun claim_tokens(sender: &signer) acquires VestingData, FungibleStoreController {
-        let claimable_tokens = get_claimable_amount(signer::address_of(sender));
-        assert!(claimable_tokens > 0, ERR_AMOUNT_ZERO);
+    public fun claim_tokens(vesting_stream_obj: &Object<VestingStream>) acquires ObjectController, VestingStream {
+        let obj_address = object::object_address(vesting_stream_obj);
+        let vesting_stream = borrow_global_mut<VestingStream>(obj_address);
 
-        let sender_addr = signer::address_of(sender);
-        let vesting_data = borrow_global_mut<VestingData>(@deployment_addr);
+        let claimable_amount = get_claimable_amount(vesting_stream);
+        assert!(claimable_amount > 0, ERR_AMOUNT_ZERO);
 
-        transfer_tokens_to_claimer(claimable_tokens, sender_addr, vesting_data);
+        fungible_asset::transfer(
+            &generate_fungible_store_signer(obj_address),
+            vesting_stream.vesting_store,
+            primary_fungible_store::ensure_primary_store_exists(
+                vesting_stream.beneficiary, vesting_stream.fa_metadata_object
+            ),
+            claimable_amount
+        );
 
-        let vesting_stream = simple_map::borrow_mut(&mut vesting_data.streams, &sender_addr);
-        vesting_stream.claimed_amount = vesting_stream.claimed_amount + claimable_tokens;
+        event::emit(
+            ClaimVestingStreamEvent {
+                object_address: obj_address,
+                vesting_stream: *vesting_stream_obj,
+                claimed_amount: claimable_amount
+            }
+        );
+
+        let vesting_stream_completed = vesting_stream.claimed_amount + claimable_amount == vesting_stream.amount;
+
+        if (!vesting_stream_completed) {
+            vesting_stream.claimed_amount = vesting_stream.claimed_amount + claimable_amount;
+        } else {
+            let ObjectController { delete_ref, extend_ref: _ } = move_from<ObjectController>(obj_address);
+            object::delete(delete_ref);
+            event::emit(DeleteVestingStreamEvent { vesting_stream: *vesting_stream_obj, object_address: obj_address });
+        };
     }
 
+    // - - - CREATE STREAM - - --
+
+    // FIX: given the above recommended fixes the create_vesting_stream function would have to be adjusted to allow the creation of arbitrary Object<VestingStream> instances
+    // The current implementation only allows a given benefiary to have only a single stream.
+
     /// Create new vesting stream
-    /// Only admin can call
-    /// Abort if vesting stream already exists
     public entry fun create_vesting_stream(
         sender: &signer,
         beneficiary: address,
         amount: u64,
         start_time: u64,
-        cliff: u64,
-        duration: u64
-    ) acquires VestingData, Config {
-        let sender_addr = signer::address_of(sender);
-        let config = borrow_global<Config>(@deployment_addr);
-        assert!(config.admin == sender_addr, ERR_ONLY_ADMIN_CAN_ADD_VESTING_STREAM);
+        cliff_amount: u64,
+        duration: u64,
+        fa_metadata_object: Object<Metadata>
+    ) {
+
+        // FIX: what's the concern with using >= instead of > below?
         assert!(start_time > timestamp::now_seconds(), ERR_START_TIME_MUST_BE_IN_THE_FUTURE);
-
-        let vesting_pool_mut = borrow_global_mut<VestingData>(@deployment_addr);
-
-        if (simple_map::contains_key(&vesting_pool_mut.streams, &beneficiary)) {
-            let existing_vesting_stream = simple_map::borrow(&vesting_pool_mut.streams, &beneficiary);
-            assert!(
-                existing_vesting_stream.claimed_amount == existing_vesting_stream.amount,
-                ERR_VESTING_STREAM_ALREADY_EXISTS
-            );
+        assert!(amount > 0, ERR_AMOUNT_ZERO);
+        assert!(cliff_amount <= amount, ERR_CLIFF_AMOUNT_MUST_BE_LESS_OR_EQUAL_THAN_AMOUNT);
+        if (amount != cliff_amount) {
+            // Duration 0 is only valid if cliff amount is equal to amount
+            assert!(duration > 0, ERR_DURATION_ZERO);
         };
 
-        let vesting_stream = VestingStream { amount, claimed_amount: 0, start_time, cliff, duration };
+        let sender_addr = signer::address_of(sender);
+        let constructor_ref = object::create_object(sender_addr);
+        let object_signer = object::generate_signer(&constructor_ref);
 
-        simple_map::upsert(&mut vesting_pool_mut.streams, beneficiary, vesting_stream);
+        let vesting_store = fungible_asset::create_store(&constructor_ref, fa_metadata_object);
+        let vesting_stream = VestingStream {
+            beneficiary,
+            amount,
+            claimed_amount: 0,
+            start_time,
+            cliff_amount,
+            duration,
+            fa_metadata_object,
+            vesting_store
+        };
+
+        move_to(&object_signer, vesting_stream);
+
+        let extend_ref = object::generate_extend_ref(&constructor_ref);
+        let delete_ref = object::generate_delete_ref(&constructor_ref);
+        move_to(&object_signer, ObjectController { extend_ref, delete_ref });
 
         fungible_asset::transfer(
             sender,
-            primary_fungible_store::primary_store(sender_addr, vesting_pool_mut.fa_metadata_object),
-            vesting_pool_mut.vesting_store,
+            primary_fungible_store::primary_store(sender_addr, fa_metadata_object),
+            vesting_store,
             amount
+        );
+
+        event::emit(
+            CreateVestingStreamEvent {
+                object_address: signer::address_of(&object_signer),
+                vesting_stream: object::address_to_object<VestingStream>(signer::address_of(&object_signer))
+            }
         );
     }
 
     // ================================= View Functions ================================= //
 
     #[view]
-    /// Get vesting data
-    public fun get_vesting_data(): (Object<Metadata>, Object<FungibleStore>, u64) acquires VestingData {
-        let vesting_data = borrow_global<VestingData>(@deployment_addr);
-        (vesting_data.fa_metadata_object, vesting_data.vesting_store, vesting_data.total_vesting_amount)
-    }
-
-    #[view]
-    /// Whether vesting stream exists
-    public fun exists_vesting_stream(beneficiary: address): bool acquires VestingData {
-        let vesting_data = borrow_global<VestingData>(@deployment_addr);
-        simple_map::contains_key(&vesting_data.streams, &beneficiary)
-    }
-
-    #[view]
-    /// Get vesting stream data
-    public fun get_vesting_stream(beneficiary: address): (u64, u64, u64, u64, u64) acquires VestingData {
-        let vesting_data = borrow_global<VestingData>(@deployment_addr);
-        let vesting_stream = simple_map::borrow(&vesting_data.streams, &beneficiary);
-        (
-            vesting_stream.amount,
-            vesting_stream.claimed_amount,
-            vesting_stream.start_time,
-            vesting_stream.cliff,
-            vesting_stream.duration
-        )
-    }
-
-    #[view]
-    public fun get_claimable_amount(user: address): u64 acquires VestingData {
-        // Check if the user has a vesting stream
-        // Check if the user has any tokens to claim
-
-        let vesting_data = borrow_global<VestingData>(@deployment_addr);
-        assert!(
-            simple_map::contains_key(&vesting_data.streams, &user),
-            ERR_VESTING_STREAM_DOES_NOT_EXIST
-        );
-        let vesting_stream = simple_map::borrow(&vesting_data.streams, &user);
-        let claimable_amount =
-            calculate_vested_amount(
-                vesting_stream.amount,
-                vesting_stream.start_time,
-                vesting_stream.cliff,
-                vesting_stream.duration
-            );
-        claimable_amount - vesting_stream.claimed_amount
-
-    }
-
-    #[view]
     public fun calculate_vested_amount(
-        amount: u64,
+        total_amount: u64,
         start_time: u64,
-        cliff: u64,
+        cliff_amount: u64,
         duration: u64
     ): u64 {
 
-        let begin_unlock_time = start_time + cliff;
-        let end_unlock_time = start_time + cliff + duration;
+        let end_time = start_time + duration;
 
         let current_time = timestamp::now_seconds();
 
-        if (current_time < begin_unlock_time) {
+        if (current_time < start_time) {
             return 0
         };
 
-        if (current_time > end_unlock_time) {
-            return amount
+        if (current_time > end_time) {
+            return total_amount
         };
 
-        let elapsed_time = current_time - begin_unlock_time;
-        // let percentage_unlocked = elapsed_time / duration;
-        (amount * elapsed_time) / duration
+        let elapsed_time = current_time - start_time;
+        cliff_amount + ((total_amount - cliff_amount) * elapsed_time) / duration
     }
 
     // ================================= Helper Functions ================================= //
 
-    /// Check if sender is admin or owner of the object when package is published to object
-    fun is_admin(config: &Config, sender: address): bool {
-        if (sender == config.admin) { true }
-        else {
-            if (object::is_object(@deployment_addr)) {
-                let obj = object::address_to_object<ObjectCore>(@deployment_addr);
-                object::is_owner(obj, sender)
-            } else { false }
-        }
+    public fun get_claimable_amount(vesting_stream: &mut VestingStream): u64 {
+        let claimable_amount =
+            calculate_vested_amount(
+                vesting_stream.amount,
+                vesting_stream.start_time,
+                vesting_stream.cliff_amount,
+                vesting_stream.duration
+            );
+        claimable_amount - vesting_stream.claimed_amount
     }
 
     /// Generate signer to send tokens from vesting store to user
-    fun generate_fungible_store_signer(): signer acquires FungibleStoreController {
-        object::generate_signer_for_extending(
-            &borrow_global<FungibleStoreController>(@deployment_addr).extend_ref
-        )
-    }
-
-    /// Transfer tokens from vesting store to user
-    fun transfer_tokens_to_claimer(
-        amount: u64, user_addr: address, vesting_data: &VestingData
-    ) acquires FungibleStoreController {
-        fungible_asset::transfer(
-            &generate_fungible_store_signer(),
-            vesting_data.vesting_store,
-            primary_fungible_store::ensure_primary_store_exists(user_addr, vesting_data.fa_metadata_object),
-            amount
-        );
+    fun generate_fungible_store_signer(owner_address: address): signer acquires ObjectController {
+        object::generate_signer_for_extending(&borrow_global<ObjectController>(owner_address).extend_ref)
     }
 
     // ================================= Unit Tests Helpers ================================= //
 
     #[test_only]
-    public fun init_module_for_test(
-        aptos_framework: &signer, sender: &signer, fa_metadata_object: Object<Metadata>
-    ) {
-        timestamp::set_time_has_started_for_testing(aptos_framework);
+    public fun get_most_recent_stream(): Option<Object<VestingStream>> {
+        let events = event::emitted_events<CreateVestingStreamEvent>();
+        if (vector::length(&events) == 0) {
+            return option::none()
+        };
+        let event = vector::pop_back(&mut events);
+        return option::some(event.vesting_stream)
+    }
 
-        init_module_internal(sender, fa_metadata_object);
+    #[test_only]
+    public fun get_vesting_store(vesting_stream: &Object<VestingStream>): Object<FungibleStore> acquires VestingStream {
+        let obj_address = object::object_address(vesting_stream);
+        let vesting_stream = borrow_global<VestingStream>(obj_address);
+        vesting_stream.vesting_store
+    }
+
+    #[test_only]
+    public fun get_claimable_amount_from_obj(vesting_stream: &Object<VestingStream>): u64 acquires VestingStream {
+        let obj_address = object::object_address(vesting_stream);
+        let vesting_stream = borrow_global<VestingStream>(obj_address);
+        let claimable_amount =
+            calculate_vested_amount(
+                vesting_stream.amount,
+                vesting_stream.start_time,
+                vesting_stream.cliff_amount,
+                vesting_stream.duration
+            );
+        claimable_amount - vesting_stream.claimed_amount
+    }
+
+    #[test_only]
+    public fun get_vesting_stream_details(
+        vesting_stream: &Object<VestingStream>
+    ): (address, u64, u64, u64, u64, u64) acquires VestingStream {
+        let obj_address = object::object_address(vesting_stream);
+        let vesting_stream = borrow_global<VestingStream>(obj_address);
+        (
+            vesting_stream.beneficiary,
+            vesting_stream.amount,
+            vesting_stream.claimed_amount,
+            vesting_stream.start_time,
+            vesting_stream.cliff_amount,
+            vesting_stream.duration
+        )
     }
 }
