@@ -10,7 +10,6 @@ module deployment_addr::test_end_to_end {
     use aptos_framework::timestamp;
     use aptos_framework::event;
     use std::vector;
-    use std::debug;
     use deployment_addr::vesting;
 
     fun setup_test_env(aptos_framework: &signer, sender: &signer): object::Object<fungible_asset::Metadata> {
@@ -633,6 +632,27 @@ module deployment_addr::test_end_to_end {
             100,
             100,
             50,
+            duration,
+            fa_metadata_object
+        );
+    }
+
+    #[test(aptos_framework = @0x1, sender = @deployment_addr, user1 = @0x101)]
+    fun test_create_stream_with_duration_zero_and_cliff_amount_equal_to_amount(
+        aptos_framework: &signer, sender: &signer, user1: &signer
+    ) {
+        let fa_metadata_object = setup_test_env(aptos_framework, sender);
+
+        // Create stream with duration 0 should fail
+        let duration = 0;
+        let amount = 100;
+        let cliff_amount = 100;
+        vesting::create_vesting_stream(
+            sender,
+            signer::address_of(user1),
+            100,
+            amount,
+            cliff_amount,
             duration,
             fa_metadata_object
         );

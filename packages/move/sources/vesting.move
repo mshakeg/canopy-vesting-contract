@@ -77,9 +77,8 @@ module deployment_addr::vesting {
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct ObjectController has key {
-        extend_ref: ExtendRef,
         delete_ref: object::DeleteRef,
-        fungible_store_extend_ref: ExtendRef
+        extend_ref: ExtendRef
     }
 
     // FIX: for something like Sablier's stream's that are decentralized i.e. anyone can create streams, we'd
@@ -128,8 +127,7 @@ module deployment_addr::vesting {
         if (!vesting_stream_completed) {
             vesting_stream.claimed_amount = vesting_stream.claimed_amount + claimable_amount;
         } else {
-            let ObjectController { extend_ref: _, delete_ref, fungible_store_extend_ref: _ } =
-                move_from<ObjectController>(obj_address);
+            let ObjectController { delete_ref, extend_ref: _ } = move_from<ObjectController>(obj_address);
             object::delete(delete_ref);
             event::emit(DeleteVestingStreamEvent { vesting_stream: *vesting_stream_obj, object_address: obj_address });
         };
@@ -154,17 +152,17 @@ module deployment_addr::vesting {
         // FIX: what's the concern with using >= instead of > below?
         assert!(start_time > timestamp::now_seconds(), ERR_START_TIME_MUST_BE_IN_THE_FUTURE);
         assert!(amount > 0, ERR_AMOUNT_ZERO);
-        assert!(duration > 0, ERR_DURATION_ZERO);
         assert!(cliff_amount <= amount, ERR_CLIFF_AMOUNT_MUST_BE_LESS_OR_EQUAL_THAN_AMOUNT);
+        if (amount != cliff_amount) {
+            // Duration 0 is only valid if cliff amount is equal to amount
+            assert!(duration > 0, ERR_DURATION_ZERO);
+        };
 
         let sender_addr = signer::address_of(sender);
         let constructor_ref = object::create_object(sender_addr);
         let object_signer = object::generate_signer(&constructor_ref);
 
-        let fungible_store_constructor_ref = object::create_object(signer::address_of(&object_signer));
-
-        let vesting_store = fungible_asset::create_store(&fungible_store_constructor_ref, fa_metadata_object);
-
+        let vesting_store = fungible_asset::create_store(&constructor_ref, fa_metadata_object);
         let vesting_stream = VestingStream {
             beneficiary,
             amount,
@@ -180,11 +178,7 @@ module deployment_addr::vesting {
 
         let extend_ref = object::generate_extend_ref(&constructor_ref);
         let delete_ref = object::generate_delete_ref(&constructor_ref);
-        let fungible_store_extend_ref = object::generate_extend_ref(&fungible_store_constructor_ref);
-        move_to(
-            &object_signer,
-            ObjectController { extend_ref, delete_ref, fungible_store_extend_ref }
-        );
+        move_to(&object_signer, ObjectController { extend_ref, delete_ref });
 
         fungible_asset::transfer(
             sender,
@@ -242,7 +236,7 @@ module deployment_addr::vesting {
 
     /// Generate signer to send tokens from vesting store to user
     fun generate_fungible_store_signer(owner_address: address): signer acquires ObjectController {
-        object::generate_signer_for_extending(&borrow_global<ObjectController>(owner_address).fungible_store_extend_ref)
+        object::generate_signer_for_extending(&borrow_global<ObjectController>(owner_address).extend_ref)
     }
 
     // ================================= Unit Tests Helpers ================================= //
