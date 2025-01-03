@@ -34,30 +34,30 @@ yarn test
 ### Smart contract
 The [vesting.move](packages/move/sources/vesting.move) contract contains the solution for the challenge. The entry functions are:
 #### create_vesting_stream
-Only calleable by the admin. Creates a new stream and stores the details mapped to the beneficiary's address. Transfers the FA token amount to the vesting pool primary fungible store.
+Creates a new stream and stores the details mapped to the beneficiary's address. Transfers the FA token amount to the vesting streams primary fungible store.
 
 #### claim_tokens
-Callable by the beneficiary. Checks if a stream exists and if the claimable amount is positive before transferring the tokens to the beneficiary. After a claim, the `claimed_amount` value is updated.
+Callable by anyone by passing the VestingStream Object. If the stream exists, it checks if the claimable amount is positive before transferring the tokens to the beneficiary. After a claim, the `claimed_amount` value is updated. When the full amount is claimed, the VestingStream Object is  deleted.
 
 ### Tests
 The tests are located in [test_end_to_end.move](packages/move/tests/test_end_to_end.move). To run these tests, use the command `yarn test` from either the project root or the `packages/move` directory. The output should look like this:
 ```
 Running Move unit tests
 [ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_calculate_vested_amount
-[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_claim_when_stream_does_not_exist
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_cant_create_stream_with_cliff_amount_greater_than_amount
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_cant_create_stream_with_duration_zero
 [ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_claim_zero_amount_error
 [ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_create_stream_starting_in_the_past
 [ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_create_stream_with_after_other_stream_completed
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_create_stream_with_cliff_amount_equal_to_amount
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_create_stream_with_duration_zero_and_cliff_amount_equal_to_amount
 [ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_happy_path
-[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_only_admin_can_create_stream
-[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_only_one_stream_per_user
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_happy_path_two_fa
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_multiple_identical_streams_per_user
+[ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_vesting_stream_deleted_upon_completion
 [ PASS    ] 0xf6f67805e60b18ee9ced00c3f71e030b2487af5480610e9324dd14d6f6b92690::test_end_to_end::test_view_functions
-Test result: OK. Total tests: 9; passed: 9; failed: 0
+Test result: OK. Total tests: 13; passed: 13; failed: 0
 {
   "Result": "Success"
 }
 ```
-
-## Assumptions
-- The Move contract only handles the vesting of a single FA. I have defined the FA address associated with the vesting contract in the move.toml file. In the tests, the FA is created in the setup function `setup_test_env`.
-- Each address can only get 1 vesting stream at a time. Only when a vesting stream has completed and the full amount has been claimed, can a new stream be created.
